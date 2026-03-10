@@ -109,7 +109,7 @@ For example, to bootstrap the `realm1` realm and create its root principal crede
 client ID `admin` and client secret `admin`, you can run the following command:
 
 ```shell
-java -jar runtime/admin/build/quarkus-app/quarkus-run.jar bootstrap -r realm1 -c realm1,admin,admin
+java -jar runtime/admin/build/quarkus-app/quarkus-run.jar bootstrap -r POLARIS -c POLARIS,root,s3cr3t
 ```
 
 ## Purging Realms and Principal Credentials

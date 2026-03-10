@@ -106,3 +106,10 @@ hs_err_pid*
 
 # Python Virtual Env
 .venv
+
+# Minio
+xl.meta*
+
+# Work directories
+/work/*
+/data/*
