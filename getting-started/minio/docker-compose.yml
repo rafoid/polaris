@@ -19,6 +19,23 @@
 
 services:
 
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: polaris
+      POSTGRES_PASSWORD: polaris123
+      POSTGRES_DB: polaris
+    volumes:
+      # Persistent storage for PostgreSQL data on host
+      - ../../data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polaris"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
   minio:
     image: quay.io/minio/minio:latest
     ports:
@@ -42,18 +59,38 @@ services:
       interval: 1s
       timeout: 10s
 
+  polaris-bootstrap:
+    image: apache/polaris-admin-tool:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/polaris
+      QUARKUS_DATASOURCE_USERNAME: polaris
+      QUARKUS_DATASOURCE_PASSWORD: polaris123
+      QUARKUS_DATASOURCE_DB_KIND: postgresql
+    command:
+      - bootstrap
+      - -r
+      - POLARIS
+      - -c
+      - POLARIS,root,s3cr3t
+
   polaris:
     image: apache/polaris:latest
     ports:
       # API port
       - "8181:8181"
       # Optional, allows attaching a debugger to the Polaris JVM
-      - "5005:5005"
+      - "5006:5005"
     depends_on:
+      postgres:
+        condition: service_healthy
       minio:
         condition: service_healthy
     environment:
-      JAVA_DEBUG: true
+      JAVA_DEBUG: "true"
       JAVA_DEBUG_PORT: "*:5005"
       AWS_REGION: us-west-2
       AWS_ACCESS_KEY_ID: minio_root
@@ -61,6 +98,31 @@ services:
       POLARIS_BOOTSTRAP_CREDENTIALS: POLARIS,root,s3cr3t
       polaris.realm-context.realms: POLARIS
       quarkus.otel.sdk.disabled: "true"
+
+      # ================== VERIFY WE NEED THESE ==================
+      # Not all of these config params might be needed. All these
+      # were added to enable DROP TABLE from 3rd party clients like
+      # Netezza. Test to determine the smallest possible set.
+      # ==========================================================
+      # Enable data deletion on DROP TABLE with PURGE
+      polaris.features."DROP_WITH_PURGE_ENABLED": "true"
+      # Optional: Enable cleanup when dropping catalogs (not just tables)
+      polaris.features."CLEANUP_ON_CATALOG_DROP": "false"
+      # Task executor configuration for async cleanup tasks
+      polaris.tasks.max-concurrent-tasks: "10"
+      polaris.tasks.max-queued-tasks: "100"
+      # FIX: Use remote-signing to avoid RequestScoped context issues in async tasks
+      # This makes Polaris use its own AWS credentials for cleanup tasks
+      polaris.catalog.default-access-delegation-mode: "remote-signing"
+      # ==========================================================
+
+      # PostgreSQL persistence configuration - THIS IS THE KEY!
+      POLARIS_PERSISTENCE_TYPE: relational-jdbc
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/polaris
+      QUARKUS_DATASOURCE_USERNAME: polaris
+      QUARKUS_DATASOURCE_PASSWORD: polaris123
+      QUARKUS_DATASOURCE_DB_KIND: postgresql
+
     healthcheck:
       test: ["CMD", "curl", "http://localhost:8182/q/health"]
       interval: 2s
@@ -92,7 +154,7 @@ services:
       - CLIENT_ID=root
       - CLIENT_SECRET=s3cr3t
     volumes:
-      - ../assets/polaris/:/polaris
+      - ../../data/polaris/:/polaris
     entrypoint: "/bin/sh"
     command:
       - "-c"
@@ -102,9 +164,10 @@ services:
         source /polaris/obtain-token.sh;
         echo Creating catalog...;
         export STORAGE_CONFIG_INFO='{"storageType":"S3",
-          "endpoint":"http://localhost:9000",
-          "endpointInternal":"http://minio:9000",
-          "pathStyleAccess":true}';
+          "endpoint":"http://9.30.117.69:9000",
+          "endpointInternal":"http://9.30.117.69:9000",
+          "pathStyleAccess":true,
+          "allowedLocations":["s3://bucket123","s3://bucket123/*"]}';
         export STORAGE_LOCATION='s3://bucket123';
         /polaris/create-catalog.sh POLARIS $$TOKEN;
         echo Extra grants...;

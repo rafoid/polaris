@@ -18,6 +18,8 @@
  */
 package org.apache.polaris.service.task;
 
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ManagedContext;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -83,6 +85,21 @@ public class TableCleanupTaskHandler implements TaskHandler {
 
   @Override
   public boolean handleTask(TaskEntity cleanupTask, CallContext callContext) {
+    // Manually activate RequestScoped context for async task execution
+    ManagedContext requestContext = Arc.container().requestContext();
+    if (!requestContext.isActive()) {
+      requestContext.activate();
+      try {
+        return handleTaskWithContext(cleanupTask, callContext);
+      } finally {
+        requestContext.terminate();
+      }
+    } else {
+      return handleTaskWithContext(cleanupTask, callContext);
+    }
+  }
+
+  private boolean handleTaskWithContext(TaskEntity cleanupTask, CallContext callContext) {
     IcebergTableLikeEntity tableEntity = tryGetTableEntity(cleanupTask).orElseThrow();
     LOGGER
         .atInfo()

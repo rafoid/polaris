@@ -181,9 +181,21 @@ public class JdbcMetaStoreManagerFactory implements MetaStoreManagerFactory {
         }
         initializeForRealm(
             datasourceOperations, realmContext, bootstrapOptions.rootCredentialsSet());
-        PrincipalSecretsResult secretsResult =
-            bootstrapServiceAndCreatePolarisPrincipalForRealm(realmContext);
-        results.put(realm, secretsResult);
+        try {
+          PrincipalSecretsResult secretsResult =
+              bootstrapServiceAndCreatePolarisPrincipalForRealm(realmContext);
+          results.put(realm, secretsResult);
+        } catch (IllegalArgumentException e) {
+          // Check if this is the "already bootstrapped" error
+          if (e.getMessage() != null && e.getMessage().contains("already been bootstrapped")) {
+            LOGGER.info("Realm '{}' already bootstrapped - skipping", realm);
+            // Create a success result for already bootstrapped realm
+            results.put(realm, new PrincipalSecretsResult(BaseResult.ReturnStatus.SUCCESS, null));
+          } else {
+            // Re-throw other IllegalArgumentExceptions
+            throw e;
+          }
+        }
       }
     }
 
